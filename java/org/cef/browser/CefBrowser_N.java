@@ -164,9 +164,22 @@ abstract class CefBrowser_N extends CefNativeAdapter implements CefBrowser {
 
     CompletableFuture<Integer> executeDevToolsMethod(String method, String parametersAsJson) {
         CompletableFuture<Integer> future = new CompletableFuture<>();
+        logDevToolsBoundary(
+                "java-message-id-future-created",
+                method,
+                "hasParams="
+                        + (parametersAsJson != null)
+                        + " paramsLength="
+                        + safeLength(parametersAsJson)
+                        + " futureId="
+                        + System.identityHashCode(future));
         N_ExecuteDevToolsMethod(method, parametersAsJson, new IntCallback() {
             @Override
             public void onComplete(int generatedMessageId) {
+                logDevToolsBoundary(
+                        "java-message-id-callback",
+                        method,
+                        "generatedMessageId=" + generatedMessageId);
                 if (generatedMessageId <= 0) {
                     future.completeExceptionally(new DevToolsException(
                             String.format("Failed to execute DevTools method %s", method)));
@@ -175,7 +188,37 @@ abstract class CefBrowser_N extends CefNativeAdapter implements CefBrowser {
                 }
             }
         });
+        future.whenComplete((value, error) ->
+                logDevToolsBoundary(
+                        "java-message-id-future-completed",
+                        method,
+                        "success="
+                                + (error == null)
+                                + (error != null
+                                        ? " exceptionType=" + error.getClass().getSimpleName()
+                                        : " messageId=" + value)
+                                + " futureId="
+                                + System.identityHashCode(future)));
         return future;
+    }
+
+    private static int safeLength(String value) {
+        return value != null ? value.length() : -1;
+    }
+
+    private static void logDevToolsBoundary(String event, String method, String details) {
+        StringBuilder message = new StringBuilder("[JCEF-DEVTOOLS-JAVA] event=")
+                .append(event)
+                .append(" method=\"")
+                .append(method)
+                .append('"');
+        if (details != null && !details.isEmpty()) {
+            message.append(' ').append(details);
+        }
+        message.append(" thread=\"")
+                .append(Thread.currentThread().getName())
+                .append('"');
+        System.out.println(message);
     }
 
     CefRegistration addDevToolsMessageObserver(CefDevToolsMessageObserver observer) {

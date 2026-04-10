@@ -5,6 +5,7 @@
 #include "CefBrowser_N.h"
 
 #include "include/base/cef_callback.h"
+#include "include/base/cef_logging.h"
 #include "include/cef_browser.h"
 #include "include/cef_parser.h"
 #include "include/cef_task.h"
@@ -24,6 +25,9 @@
 #include "temp_window.h"
 #include "window_handler.h"
 
+#include <sstream>
+#include <thread>
+
 #if defined(OS_LINUX)
 #define XK_3270  // for XK_3270_BackTab
 #include <X11/XF86keysym.h>
@@ -42,6 +46,20 @@
 #endif
 
 namespace {
+
+std::string CurrentThreadIdString() {
+  std::ostringstream stream;
+  stream << std::this_thread::get_id();
+  return stream.str();
+}
+
+void LogDevToolsNativeEvent(const std::string& event,
+                            const CefString& method,
+                            const std::string& details) {
+  LOG(INFO) << "[JCEF-DEVTOOLS-NATIVE] event=" << event << " method=\""
+            << method.ToString() << "\" " << details << " thread=\""
+            << CurrentThreadIdString() << "\"";
+}
 
 int GetCefModifiers(JNIEnv* env, jclass cls, int modifiers) {
   JNI_STATIC_DEFINE_INT_RV(env, cls, ALT_DOWN_MASK, 0);
@@ -1059,12 +1077,19 @@ void executeDevToolsMethod(CefRefPtr<CefBrowserHost> host,
                            const CefString& method,
                            const CefString& parametersAsJson,
                            CefRefPtr<IntCallback> callback) {
+  LogDevToolsNativeEvent("native-execute-start", method,
+                         std::string("hasParams=") +
+                             (parametersAsJson.empty() ? "false" : "true") +
+                         " on_ui=" +
+                         (CefCurrentlyOn(TID_UI) ? "true" : "false"));
   CefRefPtr<CefDictionaryValue> parameters = nullptr;
   if (!parametersAsJson.empty()) {
     CefRefPtr<CefValue> value = CefParseJSON(
         parametersAsJson, cef_json_parser_options_t::JSON_PARSER_RFC);
 
     if (!value || value->GetType() != VTYPE_DICTIONARY) {
+      LogDevToolsNativeEvent("native-execute-invalid-params", method,
+                             "reason=invalid-json-dictionary");
       callback->onComplete(0);
       return;
     }
@@ -1072,7 +1097,10 @@ void executeDevToolsMethod(CefRefPtr<CefBrowserHost> host,
     parameters = value->GetDictionary();
   }
 
-  callback->onComplete(host->ExecuteDevToolsMethod(0, method, parameters));
+  const int message_id = host->ExecuteDevToolsMethod(0, method, parameters);
+  LogDevToolsNativeEvent("native-execute-returned", method,
+                         std::string("messageId=") + std::to_string(message_id));
+  callback->onComplete(message_id);
 }
 
 void OnAfterParentChanged(CefRefPtr<CefBrowser> browser) {
@@ -1234,15 +1262,22 @@ Java_org_cef_browser_CefBrowser_1N_N_1ExecuteDevToolsMethod(
     jstring parametersAsJson,
     jobject jcallback) {
   CefRefPtr<IntCallback> callback = new IntCallback(env, jcallback);
+  CefString strMethod = GetJNIString(env, method);
+  CefString strParametersAsJson = GetJNIString(env, parametersAsJson);
 
   CefRefPtr<CefBrowser> browser = GetJNIBrowser(env, jbrowser);
   if (!browser.get()) {
+    LogDevToolsNativeEvent("jni-execute-browser-missing", strMethod,
+                           "messageId=0");
     callback->onComplete(0);
     return;
   }
 
-  CefString strMethod = GetJNIString(env, method);
-  CefString strParametersAsJson = GetJNIString(env, parametersAsJson);
+  LogDevToolsNativeEvent("jni-execute-dispatch", strMethod,
+                         std::string("hasParams=") +
+                             (strParametersAsJson.empty() ? "false" : "true") +
+                         " on_ui=" +
+                         (CefCurrentlyOn(TID_UI) ? "true" : "false"));
 
   if (CefCurrentlyOn(TID_UI)) {
     executeDevToolsMethod(browser->GetHost(), strMethod, strParametersAsJson,
