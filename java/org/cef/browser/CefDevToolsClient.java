@@ -36,7 +36,6 @@ public class CefDevToolsClient implements AutoCloseable {
                     future.completeExceptionally(
                             new DevToolsException("DevTools method failed", result));
                 }
-                removeQueuedCommand(messageId);
             }
 
             @Override
@@ -105,8 +104,25 @@ public class CefDevToolsClient implements AutoCloseable {
             return future;
         }
 
-        return browser_.executeDevToolsMethod(method, parametersAsJson)
-                .thenCompose(this::getQueuedCommand);
+        CompletableFuture<String> future = new CompletableFuture<>();
+        browser_.executeDevToolsMethod(method, parametersAsJson)
+                .whenComplete((messageId, throwable) -> {
+                    if (throwable != null) {
+                        future.completeExceptionally(throwable);
+                        return;
+                    }
+
+                    CompletableFuture<String> queuedCommand = getQueuedCommand(messageId);
+                    queuedCommand.whenComplete((result, queuedThrowable) -> {
+                        removeQueuedCommand(messageId);
+                        if (queuedThrowable != null) {
+                            future.completeExceptionally(queuedThrowable);
+                        } else {
+                            future.complete(result);
+                        }
+                    });
+                });
+        return future;
     }
 
     /**
