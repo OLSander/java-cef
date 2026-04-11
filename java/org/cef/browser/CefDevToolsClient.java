@@ -63,10 +63,6 @@ public class CefDevToolsClient implements AutoCloseable {
         return queuedCommands_.computeIfAbsent(messageId, key -> new CompletableFuture<>());
     }
 
-    private void removeQueuedCommand(Integer messageId) {
-        queuedCommands_.remove(messageId);
-    }
-
     /**
      * Execute a method call over the DevTools protocol. See the <a
      * href=https://chromedevtools.github.io/devtools-protocol/> DevTools protocol documentation</a>
@@ -105,8 +101,11 @@ public class CefDevToolsClient implements AutoCloseable {
             return future;
         }
 
-        return browser_.executeDevToolsMethod(method, parametersAsJson)
-                .thenCompose(this::getQueuedCommand);
+        return browser_.executeDevToolsMethod(method, parametersAsJson).thenCompose(messageId -> {
+            CompletableFuture<String> queuedCommand = getQueuedCommand(messageId);
+            return queuedCommand.whenComplete(
+                    (result, throwable) -> queuedCommands_.remove(messageId, queuedCommand));
+        });
     }
 
     /**
