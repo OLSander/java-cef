@@ -29,13 +29,21 @@ public class CefDevToolsClient implements AutoCloseable {
             @Override
             public void onDevToolsMethodResult(
                     CefBrowser browser, int messageId, boolean success, String result) {
-                CompletableFuture<String> future = getQueuedCommand(messageId);
+                CefBrowser_N.logDevToolsOrdering("observer-method-result-enter",
+                        "messageId=" + messageId + " success=" + success);
+                CompletableFuture<String> future = getQueuedCommand(messageId, "observer");
+                CefBrowser_N.logDevToolsOrdering("observer-method-result-before-complete",
+                        "messageId=" + messageId + " success=" + success
+                                + " futureId=" + futureId(future));
                 if (success) {
                     future.complete(result);
                 } else {
                     future.completeExceptionally(
                             new DevToolsException("DevTools method failed", result));
                 }
+                CefBrowser_N.logDevToolsOrdering("observer-method-result-after-complete",
+                        "messageId=" + messageId + " success=" + success
+                                + " futureId=" + futureId(future));
             }
 
             @Override
@@ -58,8 +66,20 @@ public class CefDevToolsClient implements AutoCloseable {
         return registration_ == null;
     }
 
-    private CompletableFuture<String> getQueuedCommand(Integer messageId) {
-        return queuedCommands_.computeIfAbsent(messageId, key -> new CompletableFuture<>());
+    private static int futureId(CompletableFuture<?> future) {
+        return System.identityHashCode(future);
+    }
+
+    private CompletableFuture<String> getQueuedCommand(Integer messageId, String source) {
+        boolean[] created = {false};
+        CompletableFuture<String> future = queuedCommands_.computeIfAbsent(messageId, key -> {
+            created[0] = true;
+            return new CompletableFuture<>();
+        });
+        CefBrowser_N.logDevToolsOrdering("queued-command-lookup",
+                "messageId=" + messageId + " source=" + source + " action="
+                        + (created[0] ? "created" : "reused") + " futureId=" + futureId(future));
+        return future;
     }
 
     /**
@@ -100,10 +120,17 @@ public class CefDevToolsClient implements AutoCloseable {
             return future;
         }
 
+        CefBrowser_N.logDevToolsOrdering("consumer-execute-request", "method=\"" + method + "\"");
         return browser_.executeDevToolsMethod(method, parametersAsJson).thenCompose(messageId -> {
-            CompletableFuture<String> queuedCommand = getQueuedCommand(messageId);
-            return queuedCommand.whenComplete(
-                    (result, throwable) -> queuedCommands_.remove(messageId, queuedCommand));
+            CefBrowser_N.logDevToolsOrdering("consumer-thenCompose-enter",
+                    "method=\"" + method + "\" messageId=" + messageId);
+            CompletableFuture<String> queuedCommand = getQueuedCommand(messageId, "consumer");
+            return queuedCommand.whenComplete((result, throwable) -> {
+                CefBrowser_N.logDevToolsOrdering("consumer-whenComplete",
+                        "method=\"" + method + "\" messageId=" + messageId + " futureId="
+                                + futureId(queuedCommand) + " hasThrowable=" + (throwable != null));
+                queuedCommands_.remove(messageId, queuedCommand);
+            });
         });
     }
 

@@ -29,6 +29,7 @@ import java.awt.event.MouseWheelEvent;
 import java.awt.event.WindowEvent;
 import java.util.Vector;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
 
 import javax.swing.SwingUtilities;
 
@@ -39,6 +40,7 @@ import javax.swing.SwingUtilities;
  * CefBrowser instance, please use CefBrowserFactory.
  */
 abstract class CefBrowser_N extends CefNativeAdapter implements CefBrowser {
+    private static final AtomicLong DEVTOOLS_ORDER_SEQUENCE_ = new AtomicLong();
     private volatile boolean isPending_ = false;
     private final CefClient client_;
     private final String url_;
@@ -162,17 +164,31 @@ abstract class CefBrowser_N extends CefNativeAdapter implements CefBrowser {
         return devToolsClient_;
     }
 
+    static void logDevToolsOrdering(String event, String details) {
+        System.out.println("[JCEF-DEVTOOLS-ORDER] seq=" + DEVTOOLS_ORDER_SEQUENCE_.incrementAndGet()
+                + " event=" + event + " thread=\"" + Thread.currentThread().getName() + "\" "
+                + details);
+    }
+
     CompletableFuture<Integer> executeDevToolsMethod(String method, String parametersAsJson) {
         CompletableFuture<Integer> future = new CompletableFuture<>();
+        logDevToolsOrdering("java-message-id-future-created",
+                "method=\"" + method + "\" futureId=" + System.identityHashCode(future));
         N_ExecuteDevToolsMethod(method, parametersAsJson, new IntCallback() {
             @Override
             public void onComplete(int generatedMessageId) {
+                logDevToolsOrdering("java-message-id-callback-enter",
+                        "method=\"" + method + "\" generatedMessageId=" + generatedMessageId
+                                + " futureId=" + System.identityHashCode(future));
                 if (generatedMessageId <= 0) {
                     future.completeExceptionally(new DevToolsException(
                             String.format("Failed to execute DevTools method %s", method)));
                 } else {
                     future.complete(generatedMessageId);
                 }
+                logDevToolsOrdering("java-message-id-callback-exit",
+                        "method=\"" + method + "\" generatedMessageId=" + generatedMessageId
+                                + " futureId=" + System.identityHashCode(future));
             }
         });
         return future;
