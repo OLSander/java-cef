@@ -12,6 +12,13 @@
 
 namespace {
 
+// Tracks whether the current native thread has been persistently attached to
+// the JVM by JCEF. When true, DetachCurrentThread is intentionally skipped so
+// that the attach/detach cost is paid only once per native thread lifetime
+// rather than on every callback invocation. The JVM detaches the thread
+// automatically on thread exit.
+thread_local bool tls_jcef_attached = false;
+
 // Retrieves the JNIEnv for the current thread. Attaches the VM to the current
 // thread if necessary. Sets |mustDetach| to true if DetachJNIEnv must be
 // called.
@@ -25,9 +32,13 @@ jint GetJNIEnv(JNIEnv** env, bool* mustDetach) {
 
   jint result = jvm->GetEnv((void**)env, JNI_VERSION_1_6);
   if (result == JNI_EDETACHED) {
-    result = jvm->AttachCurrentThreadAsDaemon((void**)env, nullptr);
-    if (result == JNI_OK) {
-      *mustDetach = true;
+    if (!tls_jcef_attached) {
+      result = jvm->AttachCurrentThreadAsDaemon((void**)env, nullptr);
+      if (result == JNI_OK) {
+        tls_jcef_attached = true;
+        // mustDetach stays false: we do not detach per-callback. The JVM
+        // will detach the native thread automatically on thread exit.
+      }
     }
   }
 
