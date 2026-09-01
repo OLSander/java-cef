@@ -17,6 +17,7 @@ import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GraphicsEnvironment;
 import java.awt.MouseInfo;
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -48,6 +49,10 @@ import javax.swing.ToolTipManager;
  * CefBrowser instance, please use CefBrowserFactory.
  */
 class CefBrowserWr extends CefBrowser_N {
+    // MouseInfo.getNumberOfButtons() throws HeadlessException, and no mouse events occur headless.
+    private static final int MOUSE_BUTTON_COUNT =
+            GraphicsEnvironment.isHeadless() ? 5 : MouseInfo.getNumberOfButtons();
+
     private Canvas canvas_ = null;
     private Component component_ = null;
     private Rectangle content_rect_ = new Rectangle(0, 0, 0, 0);
@@ -81,8 +86,8 @@ class CefBrowserWr extends CefBrowser_N {
 
     private CefWindowHandlerAdapter win_handler_ = new CefWindowHandlerAdapter() {
         private Point lastPos = new Point(-1, -1);
-        private long[] nextClick = new long[MouseInfo.getNumberOfButtons()];
-        private int[] clickCnt = new int[MouseInfo.getNumberOfButtons()];
+        private long[] nextClick = new long[MOUSE_BUTTON_COUNT];
+        private int[] clickCnt = new int[MOUSE_BUTTON_COUNT];
 
         @Override
         public Rectangle getRect(CefBrowser browser) {
